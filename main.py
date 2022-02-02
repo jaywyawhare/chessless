@@ -1,5 +1,4 @@
 import chess
-import chess.pgn
 from chess import Board, Move, STARTING_FEN
 
 positions = []
