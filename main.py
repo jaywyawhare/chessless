@@ -17,12 +17,13 @@ black_material = 0
 
 for square in chess.SQUARES:
     piece = board.piece_at(square)
-    if piece is not None:
-        if piece.color == chess.WHITE:
-            white_material += piece_values[piece.symbol()]
-        else:
-            black_material += piece_values[piece.symbol()]
-
+    if not piece:
+        continue
+    if piece.color == chess.WHITE:
+        white_material += piece_values[piece.piece_type]
+    else:
+        black_material += piece_values[piece.piece_type]
+        
 def maxmini(board, depth, alpha, beta, color):
     if depth == 0 or board.is_game_over():
         return board.result()
