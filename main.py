@@ -1,8 +1,8 @@
 import chess
-from chess import Board, Move, STARTING_FEN
+from chess import STARTING_FEN
+import pygame
 
-positions = []
-piece_values = {
+material_values = {
     'p': 1,
     'n': 3,
     'b': 3.25,
@@ -11,65 +11,36 @@ piece_values = {
     'k': 0
 }
 
-board = chess.Board(chess.STARTING_FEN)
-white_material = 0
-black_material = 0
+def evaluate_material(board):
+    total = 0
+    for piece in board.pieces():
+        total += material_values[piece.symbol()]
+    return total
 
-for square in chess.SQUARES:
-    piece = board.piece_at(square)
-    if not piece:
-        continue
-    if piece.color == chess.WHITE:
-        white_material += piece_values[piece.piece_type]
-    else:
-        black_material += piece_values[piece.piece_type]
-        
-def maxmini(board, depth, alpha, beta, color):
-    if depth == 0 or board.is_game_over():
-        return board.result()
-    if color == chess.WHITE:
-        best_value = -9999
+def maxmin(depth, alpha, beta, WHITE, BLACK):
+    if depth == 0:
+        return evaluate_material(board)
+    if WHITE:
+        best = -9999
         for move in board.legal_moves:
             board.push(move)
-            value = maxmini(board, depth - 1, alpha, beta, chess.BLACK)
+            best = max(best, maxmin(depth - 1, alpha, beta, False, BLACK))
             board.pop()
-            best_value = max(best_value, value)
-            alpha = max(alpha, best_value)
+            alpha = max(alpha, best)
             if beta <= alpha:
                 break
-        return best_value
+        return best
     else:
-        best_value = 9999
+        best = 9999
         for move in board.legal_moves:
             board.push(move)
-            value = maxmini(board, depth - 1, alpha, beta, chess.WHITE)
+            best = min(best, maxmin(depth - 1, alpha, beta, WHITE, False))
             board.pop()
-            best_value = min(best_value, value)
-            beta = min(beta, best_value)
+            beta = min(beta, best)
             if beta <= alpha:
                 break
-        return best_value
+        return best
 
-def generate_tree(fen):
-    board = chess.Board(fen)
-    legal_moves = list(board.legal_moves)
-    if fen in positions:
-        return positions[fen]
-    else:
-        for move in legal_moves:
-            board.push(move)
-            value = maxmini(board, 3, -9999, 9999, chess.WHITE)
-            board.pop()
-            positions[fen] = value
-        return value
-
-        generate_tree(next_fen)
-        try:
-            generate_tree(STARTING_FEN)
-        
-        except RecursionError:
-            print('RecursionError')
-            return
-        except:
-            print('Error')
-            return
+def generate_tree(STARTING_FEN, WHITE, BLACK):
+    board = chess.Board(STARTING_FEN)
+    return maxmin(3, -9999, 9999, WHITE, BLACK)
