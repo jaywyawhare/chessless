@@ -1,3 +1,2 @@
-chess
-pygame
-random
+python-chess
+stockfish
