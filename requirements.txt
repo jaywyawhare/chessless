@@ -1,2 +1,4 @@
 python-chess
-stockfish
+numpy 
+pandas 
+tqdm
