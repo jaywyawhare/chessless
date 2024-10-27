@@ -1,16 +1,8 @@
-# Chessless - The "Worst Move" Chess Engine
+# Chessless - The "Worst" Chess Engine
 
 ## Introduction
 
-A chess engine written in Python that always plays the worst move on the board. Whether you're a beginner looking for a relaxed game or an experienced player seeking a unique challenge, Chessless is here to provide a lighthearted and amusing chess experience.
-
-## Features
-
-- Always Makes the Worst Move: Chessless is designed to choose the least optimal move in any given position, making it the perfect opponent for those who want to enjoy a more casual game of chess.
-
-- User-Friendly Interface: Chessless provides a simple and intuitive interface for users to make their moves. It accepts standard algebraic notation for moves.
-
-- Single-Player Mode: Play against Chessless as a single player for a fun and stress-free gaming experience.
+Chessless is a chess engine written in Python that explores the concept of using Stockfish to evaluate random FEN positions. The engine converts board representations into 64-bit unsigned integers, focusing solely on six features: Pawn, Rook, Knight, Bishop, Queen, and King.
 
 ## Requirements
 
@@ -24,60 +16,47 @@ A chess engine written in Python that always plays the worst move on the board. 
     git clone https://github.com/jaywyawhare/chessless.git
     ```
 
-1. Navigate to the Chessless directory:
+2. Navigate to the Chessless directory:
 
     ```bash
     cd chessless
     ```
 
-1. Run the setup script:
+3. Run the setup script:
 
     ```bash
     bash setup.sh
     ```
-1. Install the required Python packages:
+
+4. Install the required Python packages:
 
     ```bash
     pip install -r requirements.txt
     ```
-    
-1. Run the Chessless engine:
 
-    ```bash
-    python chessless.py
-    ```
+## Usage
 
-## How to Play
+After installation, you can run the script with the following command:
 
-1. Run the Chessless engine by following the [installation instructions](#installation).
+```bash
+python main.py
+```
 
-1. Make your moves using standard algebraic notation. For example, if you want to move a pawn from e2 to e4, type e2e4.
+You can also provide a FEN string as an argument to evaluate specific positions.
 
-1. Chessless will respond with the worst possible move.
+## Features
 
-1. Continue the game until checkmate, stalemate, or until you decide to end the game.
-
-## Example Gameplay
-    ```less
-    Welcome to Chessless - The "Worst Move" Chess Engine!
-
-    Current Board:
-
-    8   r n b q k b n r
-    7   p p p p p p p p
-    6
-    5
-    4           P
-    3
-    2   P P P P   P P P
-    1   R N B Q K B N R
-
-    Enter your move (e.g., e2e4): e2e4
-    ```
+- Converts chess board representations to a 64-bit integer format.
+- Trains on a limited feature set focusing on basic chess pieces.
 
 ## Contributing
 
 Contributions to Chessless are welcome! If you have ideas for improvements or new features, feel free to submit a pull request.
 
 ## License
+
 This project is licensed under the [DBaJ-NC-CFL](./LICENCE.md).
+
+---
+
+Special thanks to George Hotz's [Twitch Stream](https://www.twitch.tv/georgehotz) and Google DeepMind's [Searchless Chess](https://github.com/google-deepmind/searchless_chess) for inspiration!
