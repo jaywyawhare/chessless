@@ -1,5 +1,11 @@
 import numpy as np
-from src.utils import convert_algebraic_to_san, convert_fen_to_bitboard, serialize_position
+from src.utils import (
+    convert_algebraic_to_san,
+    convert_fen_to_bitboard,
+    serialize_position,
+)
+import chess
+
 
 class GameProcessor:
     def make_dataset(self, game):
@@ -14,7 +20,7 @@ class GameProcessor:
                 dataset.append((fen, serialized_position))
             except Exception as e:
                 print(f"Error serializing position for FEN {fen}: {e}")
-                continue  
+                continue
 
         return dataset
 
@@ -37,3 +43,14 @@ class GameProcessor:
             dataset = self.make_dataset(game)
             processed_games.extend(dataset)
         return processed_games
+
+    def generate_legal_moves(self, fen):
+        """Generate all legal moves from a position"""
+        board = chess.Board(fen)
+        return list(board.legal_moves)
+
+    def get_position_after_move(self, fen, move):
+        """Get resulting position after making a move"""
+        board = chess.Board(fen)
+        board.push(move)
+        return board.fen()
