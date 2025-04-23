@@ -1,4 +1,8 @@
 python-chess
-numpy 
-pandas 
+colorama
 tqdm
+numpy
+pytest
+requests
+flask
+flask-socketio
