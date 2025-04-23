@@ -1,62 +1,17 @@
-# Chessless - The "Worst" Chess Engine
+# Chessless - The Worst Chess Engine Ever
 
-## Introduction
-
-Chessless is a chess engine written in Python that explores the concept of using Stockfish to evaluate random FEN positions. The engine converts board representations into 64-bit unsigned integers, focusing solely on six features: Pawn, Rook, Knight, Bishop, Queen, and King.
-
-## Requirements
-
-- Python 3.x
-
-## Installation
-
-1. Clone the Chessless repository to your local machine:
-
-    ```bash
-    git clone https://github.com/jaywyawhare/chessless.git
-    ```
-
-2. Navigate to the Chessless directory:
-
-    ```bash
-    cd chessless
-    ```
-
-3. Run the setup script:
-
-    ```bash
-    bash setup.sh
-    ```
-
-4. Install the required Python packages:
-
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-## Usage
-
-After installation, you can run the script with the following command:
-
-```bash
-python main.py
-```
-
-You can also provide a FEN string as an argument to evaluate specific positions.
+Chessless is a chess engine that plays the worst possible moves. It uses a combination of techniques like move ordering, evaluation functions, search algorithms, razoring, null move pruning and late move reductions to ensure that it consistently makes terrible decisions.
 
 ## Features
+- Guaranteed to lose every game (if it doesn't, that's a bug)
+- Makes moves that would make chess grandmasters cry
+- Great for beginners (or your ego)
 
-- Converts chess board representations to a 64-bit integer format.
-- Trains on a limited feature set focusing on basic chess pieces.
+## Usage
+Use at your own risk. No warranties, no guarantees, just pure chess chaos.
 
 ## Contributing
-
-Contributions to Chessless are welcome! If you have ideas for improvements or new features, feel free to submit a pull request.
+Found a way to make it play even worse? Submit a PR!
 
 ## License
-
-This project is licensed under the [DBaJ-NC-CFL](./LICENCE.md).
-
----
-
-Special thanks to George Hotz's [Twitch Stream](https://www.twitch.tv/georgehotz) and Google DeepMind's [Searchless Chess](https://github.com/google-deepmind/searchless_chess) for inspiration!
+Licensed under the "Don't Be a Jerk" Non-Commercial Care-Free License (DBaJ-NC-CFL). See [LICENSE.md](LICENSE.md) for the full legal mumbo jumbo.
