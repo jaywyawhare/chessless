@@ -1,8 +1,8 @@
 """
 Position evaluation for the worst-move engine.
 Score is from the side-to-move perspective: positive = good for side to move.
-The search minimizes this score, so we add penalties for bad traits (hanging
-pieces, exposed king, bad structure) to make the engine prefer terrible positions.
+The search minimizes this score, so we heavily penalize bad traits so the
+engine actively seeks terrible positions.
 """
 import chess
 from typing import Dict
@@ -33,14 +33,16 @@ class Evaluator:
             return self._cache[key]
 
         us = board.turn
-        them = not us
         score = (
             self._material(board)
-            + self._mobility(board)
-            - self._hanging_and_attacked(board, us)
-            - self._king_danger(board, us)
-            - self._bad_pawn_structure(board, us)
-            - self._center_control_bonus(board, us)
+            + self._mobility(board) * 0.5
+            - self._hanging_and_attacked(board, us) * 3
+            - self._king_danger(board, us) * 2
+            - self._bad_pawn_structure(board, us) * 2
+            - self._center_control_bonus(board, us) * 2
+            - self._undeveloped_and_passive(board, us)
+            - self._king_in_center(board, us)
+            - self._pieces_on_back_rank(board, us)
         )
         if len(self._cache) >= self.max_cache_size:
             self._cache.clear()
@@ -79,16 +81,15 @@ class Evaluator:
             attackers_us = board.attackers(us, sq)
             if not attackers_them:
                 continue
-            # Attacked: add penalty. If undefended or we're losing material, bigger penalty.
             val = self._piece_val(p)
             min_attacker_val = min(
                 self._piece_val(board.piece_at(s)) for s in attackers_them if board.piece_at(s)
             ) if attackers_them else 999
-            penalty += 30
+            penalty += 60
             if not attackers_us:
-                penalty += val * 2
+                penalty += val * 4
             elif min_attacker_val < val:
-                penalty += (val - min_attacker_val) * 1.5
+                penalty += (val - min_attacker_val) * 3
         return penalty
 
     def _king_danger(self, board: chess.Board, us: chess.Color) -> float:
@@ -98,19 +99,18 @@ class Evaluator:
             return 0.0
         penalty = 0.0
         n_attackers = len(board.attackers(not us, ksq))
-        penalty += n_attackers * 80
+        penalty += n_attackers * 150
         return penalty
 
     def _bad_pawn_structure(self, board: chess.Board, us: chess.Color) -> float:
-        """Penalty for doubled/isolated pawns (we want to encourage them)."""
+        """Penalty for doubled/isolated/backward pawns."""
         penalty = 0.0
         for f in range(8):
             file_sqs = [chess.square(f, r) for r in range(8)]
             count = sum(1 for sq in file_sqs if board.piece_at(sq) == chess.Piece(chess.PAWN, us))
             if count >= 2:
-                penalty += 25
+                penalty += 50
             if count >= 1:
-                # Isolated: no pawn on adjacent files
                 adj = [f - 1, f + 1]
                 has_neighbor = any(
                     0 <= af < 8 and any(
@@ -120,16 +120,48 @@ class Evaluator:
                     for af in adj
                 )
                 if not has_neighbor:
-                    penalty += 20
+                    penalty += 45
         return penalty
 
     def _center_control_bonus(self, board: chess.Board, us: chess.Color) -> float:
-        """Penalty for controlling center (we want to avoid it)."""
+        """Penalty for controlling center."""
         center = [chess.D4, chess.D5, chess.E4, chess.E5]
         penalty = 0.0
         for sq in center:
             if board.attackers(us, sq):
-                penalty += 8
+                penalty += 20
+        return penalty
+
+    def _undeveloped_and_passive(self, board: chess.Board, us: chess.Color) -> float:
+        """Penalty for having pieces on back rank (we want to avoid developing)."""
+        penalty = 0.0
+        back_rank = 0 if us == chess.WHITE else 7
+        for f in range(8):
+            sq = chess.square(f, back_rank)
+            p = board.piece_at(sq)
+            if p and p.color == us and p.piece_type != chess.KING:
+                penalty += 15
+        return penalty
+
+    def _king_in_center(self, board: chess.Board, us: chess.Color) -> float:
+        """Penalty for king still in center (we want to avoid castling)."""
+        ksq = board.king(us)
+        if ksq is None:
+            return 0.0
+        file_, rank = chess.square_file(ksq), chess.square_rank(ksq)
+        if 2 <= file_ <= 5 and (rank <= 1 if us == chess.WHITE else rank >= 6):
+            return 40
+        return 0.0
+
+    def _pieces_on_back_rank(self, board: chess.Board, us: chess.Color) -> float:
+        """Extra penalty for knights/bishops still at home (blocking castling)."""
+        penalty = 0.0
+        home_knights = [chess.B1, chess.G1] if us == chess.WHITE else [chess.B8, chess.G8]
+        home_bishops = [chess.C1, chess.F1] if us == chess.WHITE else [chess.C8, chess.F8]
+        for sq in home_knights + home_bishops:
+            p = board.piece_at(sq)
+            if p and p.color == us:
+                penalty += 25
         return penalty
 
     def clear_history(self) -> None:
