@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Chessless</title>
+    <link rel="stylesheet" href="/assets/styles.css" />
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
+  </head>
+  <body>
+    <div class="app">
+      <header class="header">
+        <h1 class="brand">Chessless</h1>
+        <div class="header-actions">
+          <span class="play-as">Play as</span>
+          <div class="segmented" role="group">
+            <button id="play-white" class="segmented-btn" type="button">White</button>
+            <button id="play-black" class="segmented-btn" type="button">Black</button>
+          </div>
+          <button id="flip" class="btn btn-icon" type="button" title="Flip board">↕</button>
+          <button id="undo" class="btn" type="button">Undo</button>
+        </div>
+      </header>
+
+      <main class="main">
+        <div class="board-container">
+          <div class="board-coords board-coords-files"></div>
+          <div class="board-coords board-coords-ranks"></div>
+          <div id="board" class="board" role="grid" aria-label="Chess board"></div>
+        </div>
+        <div class="status-line">
+          <span id="status-text" class="status-text">Choose a side to play</span>
+          <span id="check-badge" class="badge badge-check" hidden>Check</span>
+          <span id="over-badge" class="badge badge-over" hidden>Game over</span>
+        </div>
+      </main>
+    </div>
+    <script src="/assets/app.js"></script>
+  </body>
+</html>
