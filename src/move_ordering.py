@@ -1,10 +1,19 @@
 """
-Move ordering for worst-move search: try the worst moves first (low score first).
-Maximally rewards giving away material, allowing mate, moving into attacks,
-opening the king, and avoiding development/castling.
+Move ordering for worst-move search (bitboard-based).
+Try the worst moves first (low score). Heavily reward giving away material,
+allowing mate, moving into attacks, opening the king.
 """
 import chess
 from typing import List, Optional
+from src.bitboards import (
+    popcount,
+    our_pieces_bb,
+    their_attacks_bb,
+    hanging_bb,
+    square_bb,
+    BB_KING_SHIELD_WHITE,
+    BB_KING_SHIELD_BLACK,
+)
 
 
 PIECE_VALUES = {
@@ -23,75 +32,87 @@ def get_piece_value(piece: chess.Piece) -> int:
 
 def score_move(board: chess.Board, move: chess.Move) -> float:
     """
-    Lower score = worse move (we try these first).
-    Strongly prefer: allowing mate, losing material, moving into attack,
-    opening king, blocking pieces. Strongly avoid trying: good captures, castling.
+    Lower score = worse move (try first).
+    Bitboard-based: use attackers_mask, hanging_bb, their_attacks_bb.
     """
     score = 0.0
     us = board.turn
     them = not us
     from_sq = move.from_square
     to_sq = move.to_square
+    to_bb = square_bb(to_sq)
     moving_piece = board.piece_at(from_sq)
 
-    # Allow checkmate: worst possible → try first
+    # Allow checkmate: worst → try first
     board.push(move)
     if board.is_checkmate():
-        score -= 8000
-    # After our move, do we leave a piece hanging?
+        score -= 12_000
+    # Hanging pieces after our move (bitboard)
+    hanging = hanging_bb(board, us)
     for sq in chess.SQUARES:
-        p = board.piece_at(sq)
-        if not p or p.color != us:
+        if not (hanging & square_bb(sq)):
             continue
-        if board.attackers(them, sq) and not board.attackers(us, sq):
-            score -= 400 + get_piece_value(p) * 25
+        p = board.piece_at(sq)
+        if p:
+            score -= 600 + get_piece_value(p) * 35
     board.pop()
 
-    # Captures: losing material is very bad (try first); winning material is good (try last)
+    # Captures: losing material very bad; winning material good (try last)
     if board.is_capture(move):
         captured = board.piece_at(to_sq)
         if moving_piece and captured:
             mv = get_piece_value(moving_piece)
             cv = get_piece_value(captured)
             if cv > mv:
-                score -= 1200
+                score -= 1500
             elif cv == mv:
-                score -= 150
+                score -= 200
             else:
-                score += 300
+                score += 400
 
-    # After our move: sit on attacked square or block our pieces?
+    # After our move: sit on attacked square? (bitboard)
     board.push(move)
-    if board.attackers(them, to_sq) and moving_piece:
-        if not board.attackers(us, to_sq) or len(board.attackers(them, to_sq)) > len(board.attackers(us, to_sq)):
-            score -= 500 + get_piece_value(moving_piece) * 30
+    their_attacks = their_attacks_bb(board, them)
+    our_attacks = their_attacks_bb(board, us)
+    if (to_bb & their_attacks) and moving_piece:
+        def_them = popcount(board.attackers_mask(them, to_sq))
+        def_us = popcount(board.attackers_mask(us, to_sq))
+        if def_us == 0 or def_them > def_us:
+            score -= 700 + get_piece_value(moving_piece) * 40
+    # Blocking our own piece (to_sq in our attack set from another piece)
+    our_bb = our_pieces_bb(board, us)
     for sq in chess.SQUARES:
-        p = board.piece_at(sq)
-        if not p or p.color != us or sq == to_sq:
+        if sq == to_sq:
             continue
-        if p.piece_type != chess.PAWN and to_sq in board.attacks(sq):
-            score -= 80
+        if not (our_bb & square_bb(sq)):
+            continue
+        p = board.piece_at(sq)
+        if p and p.piece_type != chess.PAWN:
+            if board.attacks_mask(sq) & to_bb:
+                score -= 120
     board.pop()
 
-    # Opening our king: move pawn in front of castled king or move king's shield
+    # Opening king: move pawn in king shield (bitboard)
     if moving_piece and moving_piece.piece_type == chess.PAWN:
-        ksq = board.king(us)
-        if ksq is not None:
-            kfile = chess.square_file(ksq)
-            krank = chess.square_rank(ksq)
-            from_file, from_rank = chess.square_file(from_sq), chess.square_rank(from_sq)
-            if abs(from_file - kfile) <= 1 and (from_rank == krank or from_rank == krank + (1 if us == chess.WHITE else -1)):
-                score -= 200
+        shield = BB_KING_SHIELD_WHITE if us == chess.WHITE else BB_KING_SHIELD_BLACK
+        if square_bb(from_sq) & shield:
+            score -= 350
 
-    # Castling: good move → try last
+    # Castling: good → try last
     if board.is_castling(move):
-        score += 600
+        score += 900
 
-    # Developing knight/bishop from back rank: good → try last
-    back_rank = 0 if us == chess.WHITE else 7
-    if moving_piece and chess.square_rank(from_sq) == back_rank:
+    # Developing N/B from back rank: good → try last
+    back_rank_bb = chess.BB_RANK_1 if us == chess.WHITE else chess.BB_RANK_8
+    if moving_piece and (square_bb(from_sq) & back_rank_bb):
         if moving_piece.piece_type in (chess.KNIGHT, chess.BISHOP):
-            score += 150
+            score += 250
+
+    # Moving to corner/edge (passive): prefer (try first) → lower score
+    if moving_piece and to_sq in (chess.A1, chess.H1, chess.A8, chess.H8, chess.A2, chess.H2, chess.A7, chess.H7):
+        score -= 100
+    if moving_piece and chess.square_file(to_sq) in (0, 7):
+        score -= 40
 
     return score
 

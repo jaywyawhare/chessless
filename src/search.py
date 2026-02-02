@@ -52,18 +52,23 @@ class WorstMoveSearch:
     def _root(self, board: chess.Board, depth: int) -> Tuple[Optional[chess.Move], float]:
         moves = order_moves(board, self.history)
         best_move: Optional[chess.Move] = None
-        best_value = 1e9
+        best_value = float("inf")
 
-        for move in moves:
+        for i, move in enumerate(moves):
             if self.is_timeout():
                 raise TimeoutError
             board.push(move)
-            value = -self._negamax(board, depth - 1, -1e9, -best_value + 1)
+            if i == 0:
+                value = -self._negamax(board, depth - 1, -float("inf"), float("inf"))
+            else:
+                value = -self._negamax(board, depth - 1, -best_value - 1, -best_value)
+                if value > best_value:
+                    value = -self._negamax(board, depth - 1, -float("inf"), float("inf"))
             board.pop()
             if value < best_value:
                 best_value = value
                 best_move = move
-                if best_value <= -1e8:
+                if best_value <= -1e7:
                     break
 
         return best_move, best_value
