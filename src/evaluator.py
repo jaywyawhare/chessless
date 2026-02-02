@@ -54,17 +54,21 @@ class Evaluator:
         us = board.turn
         score = (
             self._material_bb(board)
-            + self._mobility_bb(board) * 0.3
-            - self._hanging_bb_penalty(board, us) * 4
-            - self._king_danger_bb(board, us) * 2
-            - self._bad_pawn_structure_bb(board, us) * 2
-            - self._center_control_bb(board, us) * 2
-            - self._undeveloped_bb(board, us) * 2
-            - self._king_in_center_penalty(board, us) * 2
-            - self._pieces_on_back_rank_bb(board, us) * 2
-            - self._weakened_king_shield_bb(board, us)
-            - self._pieces_on_rim_bb(board, us)
-            + self._their_pieces_on_rim_bb(board, us)
+            + self._mobility_bb(board) * 0.5
+            - self._hanging_bb_penalty(board, us) * 14
+            - self._king_danger_bb(board, us) * 8
+            - self._bad_pawn_structure_bb(board, us) * 7
+            - self._center_control_bb(board, us) * 8
+            - self._undeveloped_bb(board, us) * 7
+            - self._king_in_center_penalty(board, us) * 6
+            - self._pieces_on_back_rank_bb(board, us) * 6
+            - self._weakened_king_shield_bb(board, us) * 5
+            - self._pieces_on_rim_bb(board, us) * 1.2
+            + self._their_pieces_on_rim_bb(board, us) * 1.2
+            - self._queen_on_good_square_bb(board, us) * 2
+            - self._rooks_on_open_file_penalty(board, us)
+            - self._blocked_pieces_bonus(board, us)
+            - self._our_pieces_in_center_penalty(board, us)
         )
         if len(self._cache) >= self.max_cache_size:
             self._cache.clear()
@@ -93,7 +97,7 @@ class Evaluator:
         """Penalty for our pieces that are attacked and not defended (bitboard)."""
         them = not us
         hanging = hanging_bb(board, us)
-        penalty = popcount(hanging) * 80
+        penalty = popcount(hanging) * 220
         for sq in chess.SQUARES:
             if not (hanging & square_bb(sq)):
                 continue
@@ -118,7 +122,7 @@ class Evaluator:
         if ksq is None:
             return 0.0
         n = popcount(board.attackers_mask(not us, ksq))
-        return n * 180
+        return n * 450
 
     def _bad_pawn_structure_bb(self, board: chess.Board, us: chess.Color) -> float:
         penalty = 0.0
@@ -127,50 +131,98 @@ class Evaluator:
             file_bb = pawns_on_file_bb(board, us, f)
             cnt = popcount(file_bb)
             if cnt >= 2:
-                penalty += 60
+                penalty += 160
         isolated = isolated_files_bb(board, us)
-        penalty += popcount(isolated) * 50
+        penalty += popcount(isolated) * 120
         return penalty
 
     def _center_control_bb(self, board: chess.Board, us: chess.Color) -> float:
         our_attacks = their_attacks_bb(board, us)
-        return popcount(our_attacks & BB_CENTER) * 35
+        return popcount(our_attacks & BB_CENTER) * 95
 
     def _undeveloped_bb(self, board: chess.Board, us: chess.Color) -> float:
         backrank = BB_BACKRANK_WHITE if us == chess.WHITE else BB_BACKRANK_BLACK
         our_bb = our_pieces_bb(board, us)
         non_king = our_bb & ~board.pieces_mask(chess.KING, us)
-        return popcount(non_king & backrank) * 20
+        return popcount(non_king & backrank) * 65
 
     def _king_in_center_penalty(self, board: chess.Board, us: chess.Color) -> float:
-        return 50.0 if king_in_center_bb(board, us) else 0.0
+        return 180.0 if king_in_center_bb(board, us) else 0.0
 
     def _pieces_on_back_rank_bb(self, board: chess.Board, us: chess.Color) -> float:
         knights_home = BB_KNIGHT_HOME_WHITE if us == chess.WHITE else BB_KNIGHT_HOME_BLACK
         bishops_home = BB_BISHOP_HOME_WHITE if us == chess.WHITE else BB_BISHOP_HOME_BLACK
         n = popcount(board.pieces_mask(chess.KNIGHT, us) & knights_home)
         n += popcount(board.pieces_mask(chess.BISHOP, us) & bishops_home)
-        return n * 30
+        return n * 85
 
     def _weakened_king_shield_bb(self, board: chess.Board, us: chess.Color) -> float:
         """Penalty for missing pawns in front of king (we want to open the king)."""
         shield = BB_KING_SHIELD_WHITE if us == chess.WHITE else BB_KING_SHIELD_BLACK
         our_pawns = board.pieces_mask(chess.PAWN, us)
         missing = popcount(shield & ~our_pawns)
-        return missing * 35
+        return missing * 95
 
     def _pieces_on_rim_bb(self, board: chess.Board, us: chess.Color) -> float:
         """Penalty for our pieces on rim so we prefer to put them there (lower score)."""
         rim_bb = chess.BB_FILE_A | chess.BB_FILE_H | chess.BB_RANK_1 | chess.BB_RANK_8
         our_bb = our_pieces_bb(board, us) & ~board.pieces_mask(chess.KING, us)
-        return -popcount(our_bb & rim_bb) * 120
+        return -popcount(our_bb & rim_bb) * 280
 
     def _their_pieces_on_rim_bb(self, board: chess.Board, us: chess.Color) -> float:
         """Positive when opponent has pieces on rim; we subtract it so their score drops (we prefer that)."""
         them = not us
         rim_bb = chess.BB_FILE_A | chess.BB_FILE_H | chess.BB_RANK_1 | chess.BB_RANK_8
         their_bb = our_pieces_bb(board, them) & ~board.pieces_mask(chess.KING, them)
-        return popcount(their_bb & rim_bb) * 150
+        return popcount(their_bb & rim_bb) * 320
+
+    def _queen_on_good_square_bb(self, board: chess.Board, us: chess.Color) -> float:
+        """Penalty for our queen on center/active squares (we want queen on rim or blocked)."""
+        queen_bb = board.pieces_mask(chess.QUEEN, us)
+        if not queen_bb:
+            return 0.0
+        good_bb = BB_CENTER | chess.BB_RANK_4 | chess.BB_RANK_5
+        return popcount(queen_bb & good_bb) * 110
+
+    def _rooks_on_open_file_penalty(self, board: chess.Board, us: chess.Color) -> float:
+        """Penalty for our rooks on open/half-open files (we want them blocked)."""
+        our_pawns = board.pieces_mask(chess.PAWN, us)
+        their_pawns = board.pieces_mask(chess.PAWN, not us)
+        rooks = board.pieces_mask(chess.ROOK, us)
+        penalty = 0.0
+        for f in range(8):
+            file_bb = chess.BB_FILES[f]
+            if not (rooks & file_bb):
+                continue
+            our_on_file = bool(our_pawns & file_bb)
+            their_on_file = bool(their_pawns & file_bb)
+            if not our_on_file:
+                penalty += 70 if their_on_file else 120
+        return penalty
+
+    def _blocked_pieces_bonus(self, board: chess.Board, us: chess.Color) -> float:
+        """Bonus (negative term) for our pieces that are blocked by our own pawns/pieces."""
+        our_bb = our_pieces_bb(board, us)
+        occupied = board.occupied
+        bonus = 0.0
+        for sq in chess.SQUARES:
+            if not (our_bb & square_bb(sq)):
+                continue
+            p = board.piece_at(sq)
+            if not p or p.piece_type == chess.PAWN:
+                continue
+            attacks = board.attacks_mask(sq)
+            blocked = attacks & occupied & our_bb
+            bonus += popcount(blocked) * 40
+        return -bonus
+
+    def _our_pieces_in_center_penalty(self, board: chess.Board, us: chess.Color) -> float:
+        """Penalty for our non-pawn pieces occupying or attacking center (we want them passive)."""
+        our_bb = our_pieces_bb(board, us) & ~board.pieces_mask(chess.PAWN, us) & ~board.pieces_mask(chess.KING, us)
+        in_center = popcount(our_bb & BB_CENTER) * 90
+        our_attacks = their_attacks_bb(board, us)
+        attacking_center = popcount(our_attacks & BB_CENTER & ~our_bb) * 35
+        return in_center + attacking_center
 
     def clear_history(self) -> None:
         self.position_history.clear()

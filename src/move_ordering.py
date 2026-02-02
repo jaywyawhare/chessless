@@ -46,7 +46,9 @@ def score_move(board: chess.Board, move: chess.Move) -> float:
     # Allow checkmate: worst → try first
     board.push(move)
     if board.is_checkmate():
-        score -= 12_000
+        score -= 55_000
+    if board.is_stalemate():
+        score += 8000
     # Hanging pieces after our move (bitboard)
     hanging = hanging_bb(board, us)
     for sq in chess.SQUARES:
@@ -54,7 +56,7 @@ def score_move(board: chess.Board, move: chess.Move) -> float:
             continue
         p = board.piece_at(sq)
         if p:
-            score -= 600 + get_piece_value(p) * 35
+            score -= 1600 + get_piece_value(p) * 90
     board.pop()
 
     # Captures: losing material very bad; winning material good (try last)
@@ -64,22 +66,21 @@ def score_move(board: chess.Board, move: chess.Move) -> float:
             mv = get_piece_value(moving_piece)
             cv = get_piece_value(captured)
             if cv > mv:
-                score -= 1500
+                score -= 5500
             elif cv == mv:
-                score -= 200
+                score -= 750
             else:
-                score += 400
+                score += 1200
 
     # After our move: sit on attacked square? (bitboard)
     board.push(move)
     their_attacks = their_attacks_bb(board, them)
-    our_attacks = their_attacks_bb(board, us)
     if (to_bb & their_attacks) and moving_piece:
         def_them = popcount(board.attackers_mask(them, to_sq))
         def_us = popcount(board.attackers_mask(us, to_sq))
         if def_us == 0 or def_them > def_us:
-            score -= 700 + get_piece_value(moving_piece) * 40
-    # Blocking our own piece (to_sq in our attack set from another piece)
+            score -= 2200 + get_piece_value(moving_piece) * 100
+    # Blocking our own piece
     our_bb = our_pieces_bb(board, us)
     for sq in chess.SQUARES:
         if sq == to_sq:
@@ -89,30 +90,51 @@ def score_move(board: chess.Board, move: chess.Move) -> float:
         p = board.piece_at(sq)
         if p and p.piece_type != chess.PAWN:
             if board.attacks_mask(sq) & to_bb:
-                score -= 120
+                score -= 450
     board.pop()
 
     # Opening king: move pawn in king shield (bitboard)
     if moving_piece and moving_piece.piece_type == chess.PAWN:
         shield = BB_KING_SHIELD_WHITE if us == chess.WHITE else BB_KING_SHIELD_BLACK
         if square_bb(from_sq) & shield:
+            score -= 950
+
+    # Moving the king early (before castling): bad → try first
+    if moving_piece and moving_piece.piece_type == chess.KING:
+        if not board.is_castling(move):
+            score -= 900
+        if chess.square_file(to_sq) in (2, 3, 4, 5):
+            score -= 400
+
+    # Moving queen to rim/corner: prefer (try first)
+    if moving_piece and moving_piece.piece_type == chess.QUEEN:
+        if chess.square_file(to_sq) in (0, 7) or chess.square_rank(to_sq) in (0, 7):
+            score -= 550
+        if to_sq in (chess.A1, chess.H1, chess.A8, chess.H8):
             score -= 350
+
+    # Knight to rim (a3/h3/a6/h6): very bad → try first
+    if moving_piece and moving_piece.piece_type == chess.KNIGHT:
+        if chess.square_file(to_sq) in (0, 7):
+            score -= 500
+        if to_sq in (chess.A3, chess.H3, chess.A6, chess.H6):
+            score -= 400
 
     # Castling: good → try last
     if board.is_castling(move):
-        score += 900
+        score += 2400
 
     # Developing N/B from back rank: good → try last
     back_rank_bb = chess.BB_RANK_1 if us == chess.WHITE else chess.BB_RANK_8
     if moving_piece and (square_bb(from_sq) & back_rank_bb):
         if moving_piece.piece_type in (chess.KNIGHT, chess.BISHOP):
-            score += 250
+            score += 850
 
     # Moving to corner/edge (passive): prefer (try first) → lower score
     if moving_piece and to_sq in (chess.A1, chess.H1, chess.A8, chess.H8, chess.A2, chess.H2, chess.A7, chess.H7):
-        score -= 100
+        score -= 320
     if moving_piece and chess.square_file(to_sq) in (0, 7):
-        score -= 40
+        score -= 120
 
     return score
 
