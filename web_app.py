@@ -13,7 +13,12 @@ from src.worst_engine import WorstEngine
 import chess
 import os
 
-app = Flask(__name__, static_folder="assets", static_url_path="")
+app = Flask(
+    __name__,
+    template_folder="ui/templates",
+    static_folder="ui/assets",
+    static_url_path="",
+)
 CORS(app)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
@@ -38,10 +43,27 @@ def serve_asset(filename):
     try:
         if filename.startswith("pieces/"):
             filename = filename.lower()
-        return send_from_directory("assets", filename)
+        return send_from_directory("ui/assets", filename)
     except Exception as e:
         app.logger.error(f"Error serving asset {filename}: {e}")
         return "", 404
+
+
+def _game_outcome():
+    """Return outcome string for game-over positions: checkmate, stalemate, or draw reason."""
+    if not game_state.board.is_game_over():
+        return None
+    if game_state.board.is_checkmate():
+        return "checkmate"
+    if game_state.board.is_stalemate():
+        return "stalemate"
+    if game_state.board.is_insufficient_material():
+        return "draw_insufficient_material"
+    if game_state.board.is_fifty_moves():
+        return "draw_50_moves"
+    if game_state.board.is_repetition():
+        return "draw_repetition"
+    return "draw"
 
 
 @app.route("/api/game/status")
@@ -50,6 +72,7 @@ def game_status():
         {
             "fen": game_state.board.fen(),
             "is_game_over": game_state.board.is_game_over(),
+            "outcome": _game_outcome(),
             "is_check": game_state.board.is_check(),
             "turn": "white" if game_state.board.turn else "black",
             "player_color": "white" if game_state.player_color else "black",
@@ -72,12 +95,9 @@ def handle_color_selection(data):
 def handle_move(data):
     try:
         move_uci = data["move"]
-        # Validate move format
-        if len(move_uci) != 4:
+        if len(move_uci) not in (4, 5):
             raise ValueError("Invalid move format")
-
-        # Check if source and target squares are different
-        if move_uci[:2] == move_uci[2:]:
+        if move_uci[:2] == move_uci[2:4]:
             raise ValueError("Source and target squares must be different")
 
         move = chess.Move.from_uci(move_uci)
@@ -91,6 +111,7 @@ def handle_move(data):
             "fen": game_state.board.fen(),
             "last_move": move_uci,
             "game_over": game_state.board.is_game_over(),
+            "outcome": _game_outcome(),
             "check": game_state.board.is_check(),
             "moves": [m.uci() for m in game_state.board.legal_moves],
         }
@@ -104,6 +125,8 @@ def handle_move(data):
                     {
                         "engine_move": engine_move.uci(),
                         "fen": game_state.board.fen(),
+                        "game_over": game_state.board.is_game_over(),
+                        "outcome": _game_outcome(),
                         "moves": [m.uci() for m in game_state.board.legal_moves],
                     }
                 )

@@ -1,115 +1,72 @@
+"""
+Search that finds the worst legal move: minimizes evaluation for the side to move.
+Uses negamax with iterative deepening, transposition table, quiescence, and time limit.
+"""
 import chess
 import time
-import multiprocessing as mp
-from concurrent.futures import ThreadPoolExecutor
-from typing import Tuple, Optional, List
+from typing import Tuple, Optional, List, Dict
+from src.evaluator import Evaluator
+from src.move_ordering import order_moves
 
 
 class WorstMoveSearch:
-    def __init__(self, evaluator, max_time=5):
+    def __init__(self, evaluator: Evaluator, max_time: float = 5.0) -> None:
         self.evaluator = evaluator
-        self.nodes = 0
-        self.start_time = 0
-        self.max_time = max_time  # seconds
-        self.transposition_table = {}
-        self.max_table_size = 1000000
-        self.num_threads = mp.cpu_count()
-        self.null_move_R = 2
-        self.lmr_threshold = 4
-        self.futility_margin = 100
-        self.history_table = {}
-        self.aspiration_window = 50
-        self.razoring_margin = 300
-        self.futility_margins = [0, 100, 200, 300]
+        self.max_time = max_time
+        self.start_time = 0.0
+        self.transposition: Dict[str, Tuple[float, int]] = {}
+        self.max_tt_size = 500_000
+        self.history: Dict[str, Dict[chess.Move, int]] = {}
 
     def is_timeout(self) -> bool:
-        return time.time() - self.start_time > self.max_time
+        return time.time() - self.start_time >= self.max_time
 
     def get_worst_move(
         self, board: chess.Board, depth: int
     ) -> Tuple[Optional[chess.Move], float]:
-        try:
-            self.start_time = time.time()
-            self.nodes = 0
-            return self._iterative_deepening(board, depth)
-        except TimeoutError:
-            # Return the best move found so far
-            return self.best_move, self.best_value
-        except Exception as e:
-            print(f"Search error: {str(e)}")
-            # Return a random legal move as fallback
-            moves = list(board.legal_moves)
-            return moves[0] if moves else None, 0.0
+        legal = list(board.legal_moves)
+        if not legal:
+            return None, 0.0
 
-    def _iterative_deepening(self, board: chess.Board, max_depth: int):
-        self.best_move = None
-        self.best_value = float("inf")
+        self.start_time = time.time()
+        self.transposition.clear()
+        best_move: Optional[chess.Move] = None
+        best_value = 1e9
 
-        for depth in range(1, max_depth + 1):
+        for d in range(1, depth + 1):
             if self.is_timeout():
-                raise TimeoutError()
-
+                break
             try:
-                move, value = self._negamax_root(board, depth)
-                self.best_move = move
-                self.best_value = value
+                move, value = self._root(board, d)
+                if move is not None:
+                    best_move = move
+                    best_value = value
             except TimeoutError:
                 break
-            except Exception as e:
-                print(f"Search error at depth {depth}: {str(e)}")
-                break
 
-        if self.best_move is None:
-            # Fallback to any legal move
-            moves = list(board.legal_moves)
-            if moves:
-                self.best_move = moves[0]
-                self.best_value = 0.0
+        if best_move is None:
+            best_move = legal[0]
+            best_value = self.evaluator.evaluate_position(board)
+        return best_move, best_value
 
-        return self.best_move, self.best_value
+    def _root(self, board: chess.Board, depth: int) -> Tuple[Optional[chess.Move], float]:
+        moves = order_moves(board, self.history)
+        best_move: Optional[chess.Move] = None
+        best_value = 1e9
 
-    def _check_time(self):
-        if time.time() - self.start_time > self.max_time:
-            raise TimeoutError
+        for move in moves:
+            if self.is_timeout():
+                raise TimeoutError
+            board.push(move)
+            value = -self._negamax(board, depth - 1, -1e9, -best_value + 1)
+            board.pop()
+            if value < best_value:
+                best_value = value
+                best_move = move
+                if best_value <= -1e8:
+                    break
 
-    def _negamax_root(
-        self, board: chess.Board, depth: int
-    ) -> Tuple[Optional[chess.Move], float]:
-        legal_moves = list(board.legal_moves)
-        if not legal_moves:
-            return None, 0
-
-        # Parallel search for root moves
-        with ThreadPoolExecutor(max_workers=self.num_threads) as executor:
-            futures = []
-            for move in legal_moves:
-                board_copy = board.copy()
-                board_copy.push(move)
-                futures.append(
-                    executor.submit(
-                        self._negamax,
-                        board_copy,
-                        depth - 1,
-                        float("-inf"),
-                        float("inf"),
-                    )
-                )
-
-            results = []
-            for f in futures:
-                try:
-                    results.append(f.result())
-                except Exception as e:
-                    print(f"Search error: {e}")
-                    results.append(float("inf"))
-
-            if not results:
-                return None, 0
-
-            worst_score = min(results)
-            worst_move = legal_moves[results.index(worst_score)]
-
-            return worst_move, -worst_score
+        return best_move, best_value
 
     def _negamax(
         self,
@@ -117,109 +74,57 @@ class WorstMoveSearch:
         depth: int,
         alpha: float,
         beta: float,
-        can_null: bool = True,
     ) -> float:
-        self._check_time()
-        key = board.fen()
-        if key in self.transposition_table:
-            return self.transposition_table[key]
+        if self.is_timeout():
+            raise TimeoutError
 
-        if depth == 0:
+        if depth <= 0:
             return self._quiescence(board, alpha, beta)
 
-        # Razoring
-        if depth <= 3 and not board.is_check():
-            score = self.evaluator.evaluate_position(board)
-            if score + self.razoring_margin * depth <= alpha:
-                return self._quiescence(board, alpha, beta)
+        key = board.fen()
+        if key in self.transposition:
+            val, d = self.transposition[key]
+            if d >= depth:
+                return val
 
-        # Reverse futility pruning
-        if depth <= 3 and not board.is_check():
-            score = self.evaluator.evaluate_position(board)
-            if score - self.futility_margins[depth] >= beta:
-                return beta
-
-        # Null move pruning (reversed - skip good positions)
-        if can_null and depth >= 3 and not board.is_check():
-            board.push(chess.Move.null())
-            value = -self._negamax(
-                board, depth - self.null_move_R - 1, -beta, -alpha, False
-            )
-            board.pop()
-            if value >= beta:
-                return beta
-
-        # Internal iterative reduction
-        if depth >= 4 and not self.transposition_table.get(board.fen()):
-            depth -= 1
-
-        moves = self._get_moves_ordered(board)
-        if not moves:
+        legal = list(board.legal_moves)
+        if not legal:
             if board.is_check():
-                return -10000
-            return 0
+                return -10_000
+            return 0.0
 
-        # Late move reductions
-        value = float("inf")
-        for i, move in enumerate(moves):
-            # Futility pruning
-            if depth <= 2 and not board.is_check():
-                if value > -self.futility_margin:
-                    continue
+        best = -1e9
+        moves = order_moves(board, self.history)
 
+        for move in moves:
             board.push(move)
-            # Late move reduction
-            if i >= self.lmr_threshold and depth >= 3 and not board.is_check():
-                new_depth = depth - 2
-            else:
-                new_depth = depth - 1
-
-            curr_value = -self._negamax(board, new_depth, -beta, -alpha)
+            score = -self._negamax(board, depth - 1, -beta, -alpha)
             board.pop()
+            if score > best:
+                best = score
+                alpha = max(alpha, best)
+                if alpha >= beta:
+                    break
 
-            value = min(value, curr_value)
-            alpha = min(alpha, value)
-            if alpha <= beta:
-                break
-
-        # Store in transposition table
-        if len(self.transposition_table) >= self.max_table_size:
-            self.transposition_table.clear()
-        self.transposition_table[key] = value
-
-        return value
+        if len(self.transposition) >= self.max_tt_size:
+            self.transposition.clear()
+        self.transposition[key] = (best, depth)
+        return best
 
     def _quiescence(self, board: chess.Board, alpha: float, beta: float) -> float:
-        stand_pat = self.evaluator.evaluate_position(board)
-
-        if stand_pat >= beta:
+        stand = self.evaluator.evaluate_position(board)
+        if stand >= beta:
             return beta
-        if alpha < stand_pat:
-            alpha = stand_pat
+        if stand > alpha:
+            alpha = stand
 
-        # Delta pruning
-        worst_possible = stand_pat - 9  # Value of queen
-        if worst_possible >= beta:
-            return beta
-
-        for move in self._get_captures(board):
+        captures = [m for m in board.legal_moves if board.is_capture(m)]
+        for move in captures:
             board.push(move)
             score = -self._quiescence(board, -beta, -alpha)
             board.pop()
-
             if score >= beta:
                 return beta
             if score > alpha:
                 alpha = score
-
         return alpha
-
-    def _get_captures(self, board: chess.Board) -> List[chess.Move]:
-        return [move for move in board.legal_moves if board.is_capture(move)]
-
-    def _get_moves_ordered(self, board: chess.Board) -> list:
-        # Order moves to check tactically bad moves first
-        # (captures that lose material, moves that walk into attacks, etc)
-        moves = list(board.legal_moves)
-        # TODO: Implement move ordering heuristics
-        return moves
