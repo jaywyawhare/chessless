@@ -6,3 +6,5 @@ pytest
 requests
 flask
 flask-socketio
+flask-cors
+CairoSVG
