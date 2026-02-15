@@ -1,16 +1,22 @@
 """
 Search that finds the worst legal move: minimizes evaluation for the side to move.
-Optimized with zobrist hashing and efficient move generation.
+Optimized with fast hashing and efficient move ordering.
 """
 import chess
 import time
 from typing import Tuple, Optional, List, Dict
 from src.evaluator import Evaluator
-from src.move_ordering import order_moves
-from src.bitboards import see_capture_fast
+from src.move_ordering import order_moves_fast
+from src.bitboards import see_capture_fast, allows_mate_in_1
+
+
+def board_hash(board: chess.Board) -> int:
+    return hash((board.board_fen(), board.turn, board.castling_rights, board.ep_square))
 
 
 class WorstMoveSearch:
+    __slots__ = ['evaluator', 'max_time', 'start_time', 'transposition', 'max_tt_size', 'history', 'killers']
+    
     def __init__(self, evaluator: Evaluator, max_time: float = 5.0) -> None:
         self.evaluator = evaluator
         self.max_time = max_time
@@ -23,12 +29,13 @@ class WorstMoveSearch:
     def is_timeout(self) -> bool:
         return time.time() - self.start_time >= self.max_time
 
-    def get_worst_move(
-        self, board: chess.Board, depth: int
-    ) -> Tuple[Optional[chess.Move], float]:
+    def get_worst_move(self, board: chess.Board, depth: int) -> Tuple[Optional[chess.Move], float]:
         legal = list(board.legal_moves)
         if not legal:
             return None, 0.0
+
+        if len(legal) == 1:
+            return legal[0], self.evaluator.evaluate_position(board)
 
         self.start_time = time.time()
         self.transposition.clear()
@@ -54,7 +61,7 @@ class WorstMoveSearch:
 
     def _root(self, board: chess.Board, depth: int) -> Tuple[Optional[chess.Move], float]:
         killers = (self.killers[0][0], self.killers[0][1]) if self.killers else (None, None)
-        moves = order_moves(board, self.history, killers)
+        moves = order_moves_fast(board, self.history, killers)
         best_move: Optional[chess.Move] = None
         best_value = float("inf")
 
@@ -62,18 +69,14 @@ class WorstMoveSearch:
             if self.is_timeout():
                 raise TimeoutError
             board.push(move)
-            if i == 0:
+            value = -self._negamax(board, depth - 1, 1, -float("inf"), float("inf") if i == 0 else -best_value)
+            if i > 0 and value > best_value:
                 value = -self._negamax(board, depth - 1, 1, -float("inf"), float("inf"))
-            else:
-                value = -self._negamax(board, depth - 1, 1, -best_value - 1, -best_value)
-                if value > best_value:
-                    value = -self._negamax(board, depth - 1, 1, -float("inf"), float("inf"))
             board.pop()
             if value < best_value:
                 best_value = value
                 best_move = move
                 self._store_killer(0, move)
-                self._store_history(board, move, depth * depth)
                 if best_value <= -45_000:
                     break
 
@@ -87,7 +90,7 @@ class WorstMoveSearch:
             self.killers[ply] = (move, k1)
 
     def _store_history(self, board: chess.Board, move: chess.Move, bonus: int) -> None:
-        key = board.zobrist_hash()
+        key = board_hash(board)
         if key not in self.history:
             self.history[key] = {}
         self.history[key][move] = self.history[key].get(move, 0) - bonus
@@ -107,21 +110,14 @@ class WorstMoveSearch:
                 return True
         return False
 
-    def _negamax(
-        self,
-        board: chess.Board,
-        depth: int,
-        ply: int,
-        alpha: float,
-        beta: float,
-    ) -> float:
+    def _negamax(self, board: chess.Board, depth: int, ply: int, alpha: float, beta: float) -> float:
         if self.is_timeout():
             raise TimeoutError
 
         if depth <= 0:
             return self._quiescence(board, ply, alpha, beta)
 
-        key = board.zobrist_hash()
+        key = board_hash(board)
         if key in self.transposition:
             val, d = self.transposition[key]
             if d >= depth and abs(val) < 45_000:
@@ -134,7 +130,7 @@ class WorstMoveSearch:
             return 15_000
 
         killers = (self.killers[ply][0], self.killers[ply][1]) if ply < len(self.killers) else (None, None)
-        moves = order_moves(board, self.history, killers)
+        moves = order_moves_fast(board, self.history, killers)
         best = -1e9
         best_move: Optional[chess.Move] = None
 
@@ -154,7 +150,6 @@ class WorstMoveSearch:
                 if alpha >= beta:
                     if best_move and not board.is_capture(best_move):
                         self._store_killer(ply, best_move)
-                        self._store_history(board, best_move, depth * depth)
                     break
 
         if len(self.transposition) >= self.max_tt_size:
@@ -164,21 +159,31 @@ class WorstMoveSearch:
         return best
 
     def _quiescence(self, board: chess.Board, ply: int, alpha: float, beta: float) -> float:
-        legal = list(board.legal_moves)
-        if not legal:
-            if board.is_check():
+        if board.is_check():
+            legal = list(board.legal_moves)
+            if not legal:
                 return -50_000 + ply
-            return 15_000
+            killers = (self.killers[ply][0], self.killers[ply][1]) if ply < len(self.killers) else (None, None)
+            moves = order_moves_fast(board, self.history, killers)
+            best = -1e9
+            for move in moves:
+                board.push(move)
+                score = -self._quiescence(board, ply + 1, -beta, -alpha)
+                board.pop()
+                if score > best:
+                    best = score
+                    alpha = max(alpha, best)
+                    if alpha >= beta:
+                        break
+            return best
+        
         stand = self.evaluator.evaluate_position(board)
         if stand >= beta:
             return beta
         if stand > alpha:
             alpha = stand
 
-        captures = [m for m in legal if board.is_capture(m)]
-        if captures:
-            captures.sort(key=lambda m: see_capture_fast(board, m))
-        for move in captures:
+        for move in board.generate_legal_captures():
             board.push(move)
             score = -self._quiescence(board, ply + 1, -beta, -alpha)
             board.pop()

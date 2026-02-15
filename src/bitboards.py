@@ -44,16 +44,7 @@ def popcount(bb: int) -> int:
     return bb.bit_count() if bb else 0
 
 
-def iter_bb(bb: int):
-    """Iterate over set bits in bitboard, yields square indices."""
-    while bb:
-        sq = (bb & -bb).bit_length() - 1
-        yield sq
-        bb &= bb - 1
-
-
 def lsb(bb: int) -> int:
-    """Return index of least significant bit."""
     return (bb & -bb).bit_length() - 1
 
 
@@ -70,7 +61,6 @@ def our_pieces_bb(board: chess.Board, color: chess.Color) -> int:
 
 def their_attacks_bb(board: chess.Board, color: chess.Color) -> int:
     attacks = 0
-    occupied = board.occupied
     for pt in chess.PIECE_TYPES:
         bb = board.pieces_mask(pt, color)
         while bb:
@@ -124,6 +114,21 @@ def isolated_files_bb(board: chess.Board, us: chess.Color) -> int:
     return isolated
 
 
+def _front_span(us: chess.Color, sq: int) -> int:
+    f = chess.square_file(sq)
+    r = chess.square_rank(sq)
+    if us == chess.WHITE:
+        return (chess.BB_FILES[f] | (chess.BB_FILES[f - 1] if f > 0 else 0) | (chess.BB_FILES[f + 1] if f < 7 else 0)) & _ranks_bb(r + 1, 7)
+    return (chess.BB_FILES[f] | (chess.BB_FILES[f - 1] if f > 0 else 0) | (chess.BB_FILES[f + 1] if f < 7 else 0)) & _ranks_bb(0, r - 1)
+
+
+def _ranks_bb(start: int, end: int) -> int:
+    bb = 0
+    for i in range(max(0, start), min(8, end + 1)):
+        bb |= chess.BB_RANKS[i]
+    return bb
+
+
 def passed_pawns_bb(board: chess.Board, us: chess.Color) -> int:
     our_pawns = board.pieces_mask(chess.PAWN, us)
     their_pawns = board.pieces_mask(chess.PAWN, not us)
@@ -132,12 +137,7 @@ def passed_pawns_bb(board: chess.Board, us: chess.Color) -> int:
     while bb:
         sq = lsb(bb)
         bb &= bb - 1
-        f = chess.square_file(sq)
-        r = chess.square_rank(sq)
-        if us == chess.WHITE:
-            front = (chess.BB_FILES[f] | (chess.BB_FILES[f - 1] if f > 0 else 0) | (chess.BB_FILES[f + 1] if f < 7 else 0)) & _ranks_bb(r + 1, 7)
-        else:
-            front = (chess.BB_FILES[f] | (chess.BB_FILES[f - 1] if f > 0 else 0) | (chess.BB_FILES[f + 1] if f < 7 else 0)) & _ranks_bb(0, r - 1)
+        front = _front_span(us, sq)
         if not (their_pawns & front):
             result |= (1 << sq)
     return result
@@ -172,13 +172,6 @@ def backward_pawns_bb(board: chess.Board, us: chess.Color) -> int:
     return result
 
 
-def _ranks_bb(start: int, end: int) -> int:
-    bb = 0
-    for i in range(max(0, start), min(8, end + 1)):
-        bb |= chess.BB_RANKS[i]
-    return bb
-
-
 def rooks_on_seventh_bb(board: chess.Board, us: chess.Color) -> int:
     rank7 = BB_RANK7_WHITE if us == chess.WHITE else BB_RANK7_BLACK
     return board.pieces_mask(chess.ROOK, us) & rank7
@@ -196,7 +189,6 @@ def pinned_bb(board: chess.Board, color: chess.Color) -> int:
 
 
 def see_capture_fast(board: chess.Board, move: chess.Move) -> int:
-    """Fast SEE without push/pop for ordering purposes."""
     if not board.is_capture(move):
         return 0
     to_sq = move.to_square
@@ -208,12 +200,11 @@ def see_capture_fast(board: chess.Board, move: chess.Move) -> int:
     gain = PIECE_VALUES.get(victim.piece_type, 0)
     loss = PIECE_VALUES.get(attacker.piece_type, 0)
     them = not attacker.color
-    recapture_value = see_recapture(board, to_sq, them, loss)
+    recapture_value = _see_recapture(board, to_sq, them, loss)
     return gain - recapture_value
 
 
-def see_recapture(board: chess.Board, sq: chess.Square, color: chess.Color, current_value: int) -> int:
-    """Estimate recapture value without full SEE."""
+def _see_recapture(board: chess.Board, sq: chess.Square, color: chess.Color, current_value: int) -> int:
     attackers = board.attackers_mask(color, sq)
     if not attackers:
         return 0
@@ -234,22 +225,46 @@ def see_recapture(board: chess.Board, sq: chess.Square, color: chess.Color, curr
     return min(min_attacker_val, current_value)
 
 
-def see_capture(board: chess.Board, move: chess.Move) -> int:
-    return see_capture_fast(board, move)
+def count_attackers(board: chess.Board, color: chess.Color, sq: int) -> int:
+    return popcount(board.attackers_mask(color, sq))
 
 
-def get_min_attacker(board: chess.Board, attackers_bb: int, color: chess.Color) -> Optional[int]:
-    """Return square of smallest attacker, or None."""
-    bb = attackers_bb
-    min_val = 100000
-    min_sq = None
+def king_escape_squares(board: chess.Board, us: chess.Color) -> int:
+    ksq = board.king(us)
+    if ksq is None:
+        return 8
+    king_attacks = board.attacks_mask(ksq)
+    their_attacks = their_attacks_bb(board, not us)
+    occupied = board.occupied
+    bad = king_attacks & (their_attacks | occupied)
+    return popcount(bad)
+
+
+def defenders_of(board: chess.Board, us: chess.Color, sq: int) -> int:
+    return popcount(board.attackers_mask(us, sq))
+
+
+def find_pieces_defending_others(board: chess.Board, us: chess.Color) -> dict:
+    result = {}
+    our_bb = our_pieces_bb(board, us)
+    bb = our_bb
     while bb:
         sq = lsb(bb)
         bb &= bb - 1
         p = board.piece_at(sq)
-        if p and p.color == color:
-            v = PIECE_VALUES_LIGHT.get(p.piece_type, 0)
-            if v < min_val:
-                min_val = v
-                min_sq = sq
-    return min_sq
+        if p and p.piece_type != chess.KING:
+            attacks = board.attacks_mask(sq)
+            defended = attacks & our_bb
+            if defended:
+                result[sq] = popcount(defended)
+    return result
+
+
+def allows_mate_in_1(board: chess.Board) -> bool:
+    for move in board.legal_moves:
+        board.push(move)
+        if board.is_checkmate():
+            board.pop()
+            return True
+        board.pop()
+    return False
