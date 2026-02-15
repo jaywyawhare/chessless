@@ -3,11 +3,11 @@ Bitboard helpers for the worst-move engine.
 Uses python-chess bitboard API: BB_*, pieces_mask, attacks_mask, attackers_mask, occupied.
 """
 import chess
-from typing import Tuple
+from typing import Optional, Tuple
 
-# Popcount (Python 3.10+)
+# Popcount – compatible with older Python versions
 def popcount(bb: int) -> int:
-    return bb.bit_count() if bb else 0
+    return bin(bb).count("1") if bb else 0
 
 # Center squares d4,d5,e4,e5
 BB_CENTER = (
@@ -127,3 +127,146 @@ def king_in_center_bb(board: chess.Board, us: chess.Color) -> bool:
     if us == chess.WHITE:
         return 2 <= f <= 5 and r <= 1
     return 2 <= f <= 5 and r >= 6
+
+
+# Piece values in centipawns for SEE
+_SEE_VALUES = {
+    chess.PAWN: 100,
+    chess.KNIGHT: 320,
+    chess.BISHOP: 330,
+    chess.ROOK: 500,
+    chess.QUEEN: 900,
+    chess.KING: 0,
+}
+
+
+def _see_piece_value(piece: Optional[chess.Piece]) -> int:
+    return _SEE_VALUES.get(piece.piece_type, 0) if piece else 0
+
+
+def see_capture(board: chess.Board, move: chess.Move) -> int:
+    """
+    Static Exchange Evaluation for a capture move.
+    Returns net centipawn gain for the side making the move (negative = we lose material).
+    """
+    if not board.is_capture(move):
+        return 0
+    to_sq = move.to_square
+    from_sq = move.from_square
+    victim = board.piece_at(to_sq)
+    piece = board.piece_at(from_sq)
+    if not victim or not piece:
+        return 0
+    v_victim = _see_piece_value(victim)
+    v_piece = _see_piece_value(piece)
+    board.push(move)
+    recapture_gain = _see_square(board, to_sq, not piece.color)
+    board.pop()
+    return v_victim - v_piece - recapture_gain
+
+
+def _see_square(board: chess.Board, sq: chess.Square, color: chess.Color) -> int:
+    """Max gain for color if they capture on sq (used recursively for SEE)."""
+    attackers = []
+    sq_bb = 1 << sq
+    for s in chess.SQUARES:
+        p = board.piece_at(s)
+        if p and p.color == color and (board.attacks_mask(s) & sq_bb):
+            attackers.append((_see_piece_value(p), s))
+    if not attackers:
+        return 0
+    attackers.sort(key=lambda x: x[0])
+    value_smallest, from_sq = attackers[0]
+    victim_val = _see_piece_value(board.piece_at(sq))
+    board.push(chess.Move(from_sq, sq))
+    recapture = _see_square(board, from_sq, not color)
+    board.pop()
+    return victim_val - value_smallest - recapture
+
+
+def pinned_bb(board: chess.Board, color: chess.Color) -> int:
+    """Bitboard of our pieces that are pinned to our king."""
+    out = 0
+    for sq in chess.SQUARES:
+        if board.piece_at(sq) and board.piece_at(sq).color == color and board.is_pinned(color, sq):
+            out |= 1 << sq
+    return out
+
+
+def _ranks_bb(start: int, end: int) -> int:
+    """Bitboard of ranks start..end inclusive (0-indexed)."""
+    bb = 0
+    for i in range(start, min(end + 1, 8)):
+        bb |= chess.BB_RANKS[i]
+    return bb
+
+
+def passed_pawns_bb(board: chess.Board, us: chess.Color) -> int:
+    """Bitboard of our pawns that are passed (no enemy pawn can stop them)."""
+    our_pawns = board.pieces_mask(chess.PAWN, us)
+    their_pawns = board.pieces_mask(chess.PAWN, not us)
+    result = 0
+    for sq in chess.SQUARES:
+        if not (our_pawns & (1 << sq)):
+            continue
+        f = chess.square_file(sq)
+        r = chess.square_rank(sq)
+        if us == chess.WHITE:
+            ahead = chess.BB_FILES[f] & _ranks_bb(r + 1, 7)
+            block = ahead
+            if f > 0:
+                block |= chess.BB_FILES[f - 1] & _ranks_bb(r + 1, 7)
+            if f < 7:
+                block |= chess.BB_FILES[f + 1] & _ranks_bb(r + 1, 7)
+        else:
+            ahead = chess.BB_FILES[f] & _ranks_bb(0, r - 1)
+            block = ahead
+            if f > 0:
+                block |= chess.BB_FILES[f - 1] & _ranks_bb(0, r - 1)
+            if f < 7:
+                block |= chess.BB_FILES[f + 1] & _ranks_bb(0, r - 1)
+        if not (their_pawns & block):
+            result |= 1 << sq
+    return result
+
+
+def backward_pawns_bb(board: chess.Board, us: chess.Color) -> int:
+    """Bitboard of our pawns that are backward (cannot be supported by a pawn behind, enemy pawn ahead)."""
+    our_pawns = board.pieces_mask(chess.PAWN, us)
+    their_pawns = board.pieces_mask(chess.PAWN, not us)
+    result = 0
+    for sq in chess.SQUARES:
+        if not (our_pawns & (1 << sq)):
+            continue
+        f = chess.square_file(sq)
+        r = chess.square_rank(sq)
+        if us == chess.WHITE:
+            if r >= 6:
+                continue
+            ahead = chess.BB_FILES[f] & _ranks_bb(r + 1, 7)
+            behind = chess.BB_FILES[f] & _ranks_bb(0, r - 1)
+            left = chess.BB_FILES[f - 1] & _ranks_bb(0, r - 1) if f > 0 else 0
+            right = chess.BB_FILES[f + 1] & _ranks_bb(0, r - 1) if f < 7 else 0
+        else:
+            if r <= 1:
+                continue
+            ahead = chess.BB_FILES[f] & _ranks_bb(0, r - 1)
+            behind = chess.BB_FILES[f] & _ranks_bb(r + 1, 7)
+            left = chess.BB_FILES[f - 1] & _ranks_bb(r + 1, 7) if f > 0 else 0
+            right = chess.BB_FILES[f + 1] & _ranks_bb(r + 1, 7) if f < 7 else 0
+        if not (their_pawns & ahead):
+            continue
+        support = our_pawns & (behind | left | right)
+        if not support:
+            result |= 1 << sq
+    return result
+
+
+BB_RANK7_WHITE = chess.BB_RANK_7
+BB_RANK7_BLACK = chess.BB_RANK_2
+
+
+def rooks_on_seventh_bb(board: chess.Board, us: chess.Color) -> int:
+    """Bitboard of our rooks on the 7th rank (2nd for black)."""
+    rank7 = BB_RANK7_WHITE if us == chess.WHITE else BB_RANK7_BLACK
+    return board.pieces_mask(chess.ROOK, us) & rank7
