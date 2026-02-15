@@ -1,34 +1,22 @@
 """
-Chess engine that chooses the worst legal move (minimizes position evaluation).
+Chess engine that chooses the worst legal move.
+Uses greedy selection for maximum speed.
 """
 import chess
 from typing import Optional
-from src.evaluator import Evaluator
-from src.search import WorstMoveSearch
+from src.greedy_engine import GreedyWorstEngine, HybridWorstEngine
 
 
 class WorstEngine:
-    __slots__ = ['depth', 'max_time', 'evaluator', 'search', 'last_move']
+    __slots__ = ['_engine', 'depth', 'max_time']
     
-    def __init__(self, depth: int = 3, max_time: float = 5.0) -> None:
+    def __init__(self, depth: int = 2, max_time: float = 1.0):
         self.depth = depth
         self.max_time = max_time
-        self.evaluator = Evaluator()
-        self.search = WorstMoveSearch(self.evaluator, max_time=max_time)
-        self.last_move: Optional[chess.Move] = None
-
+        if depth <= 1:
+            self._engine = GreedyWorstEngine()
+        else:
+            self._engine = HybridWorstEngine(depth=depth, max_time=max_time)
+    
     def get_worst_move(self, board: chess.Board) -> Optional[chess.Move]:
-        legal = list(board.legal_moves)
-        if not legal:
-            return None
-        if len(legal) == 1:
-            return legal[0]
-
-        try:
-            move, _ = self.search.get_worst_move(board, self.depth)
-            if move is None or move not in legal:
-                move = legal[0]
-            self.last_move = move
-            return move
-        except Exception:
-            return legal[0]
+        return self._engine.get_worst_move(board)
