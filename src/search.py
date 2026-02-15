@@ -1,14 +1,13 @@
 """
 Search that finds the worst legal move: minimizes evaluation for the side to move.
-Uses negamax with iterative deepening, transposition table, quiescence, LMR
-(reduce good moves), killer moves, history heuristic, and time limit.
+Optimized with zobrist hashing and efficient move generation.
 """
 import chess
 import time
 from typing import Tuple, Optional, List, Dict
 from src.evaluator import Evaluator
 from src.move_ordering import order_moves
-from src.bitboards import see_capture
+from src.bitboards import see_capture_fast
 
 
 class WorstMoveSearch:
@@ -16,9 +15,9 @@ class WorstMoveSearch:
         self.evaluator = evaluator
         self.max_time = max_time
         self.start_time = 0.0
-        self.transposition: Dict[str, Tuple[float, int]] = {}
+        self.transposition: Dict[int, Tuple[float, int]] = {}
         self.max_tt_size = 500_000
-        self.history: Dict[str, Dict[chess.Move, int]] = {}
+        self.history: Dict[int, Dict[chess.Move, int]] = {}
         self.killers: List[Tuple[Optional[chess.Move], Optional[chess.Move]]] = []
 
     def is_timeout(self) -> bool:
@@ -88,17 +87,16 @@ class WorstMoveSearch:
             self.killers[ply] = (move, k1)
 
     def _store_history(self, board: chess.Board, move: chess.Move, bonus: int) -> None:
-        key = board.fen()
+        key = board.zobrist_hash()
         if key not in self.history:
             self.history[key] = {}
         self.history[key][move] = self.history[key].get(move, 0) - bonus
 
     def _is_good_move(self, board: chess.Board, move: chess.Move) -> bool:
-        """Moves we want to search less (reduce depth) so we focus on bad moves."""
         if board.is_castling(move):
             return True
         if board.is_capture(move):
-            see_val = see_capture(board, move)
+            see_val = see_capture_fast(board, move)
             if see_val > 0:
                 return True
         from_sq = move.from_square
@@ -123,7 +121,7 @@ class WorstMoveSearch:
         if depth <= 0:
             return self._quiescence(board, ply, alpha, beta)
 
-        key = board.fen()
+        key = board.zobrist_hash()
         if key in self.transposition:
             val, d = self.transposition[key]
             if d >= depth and abs(val) < 45_000:
@@ -178,7 +176,8 @@ class WorstMoveSearch:
             alpha = stand
 
         captures = [m for m in legal if board.is_capture(m)]
-        captures.sort(key=lambda m: see_capture(board, m))
+        if captures:
+            captures.sort(key=lambda m: see_capture_fast(board, m))
         for move in captures:
             board.push(move)
             score = -self._quiescence(board, ply + 1, -beta, -alpha)
@@ -188,27 +187,3 @@ class WorstMoveSearch:
             if score > alpha:
                 alpha = score
         return alpha
-
-    def _allows_forced_mate(self, board: chess.Board, depth: int) -> int:
-        """Check if current position allows forced mate for opponent. Returns mate depth or 0."""
-        if board.is_checkmate():
-            return 1
-        if depth <= 0:
-            return 0
-        for opp_move in board.legal_moves:
-            board.push(opp_move)
-            if board.is_checkmate():
-                board.pop()
-                return 1
-            found_escape = True
-            for our_reply in board.legal_moves:
-                board.push(our_reply)
-                mate_dist = self._allows_forced_mate(board, depth - 1)
-                board.pop()
-                if mate_dist == 0:
-                    found_escape = False
-                    break
-            board.pop()
-            if found_escape:
-                return 1
-        return 0

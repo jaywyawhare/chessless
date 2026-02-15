@@ -8,11 +8,11 @@ from src.search import WorstMoveSearch
 
 
 class WorstEngine:
-    def __init__(self, depth: int = 3, max_time: int = 5) -> None:
+    def __init__(self, depth: int = 3, max_time: float = 5.0) -> None:
         self.depth = depth
         self.max_time = max_time
         self.evaluator = Evaluator()
-        self.search = WorstMoveSearch(self.evaluator, max_time=float(max_time))
+        self.search = WorstMoveSearch(self.evaluator, max_time=max_time)
         self.last_move: Optional[chess.Move] = None
 
     def get_worst_move(self, board: chess.Board) -> Optional[chess.Move]:
