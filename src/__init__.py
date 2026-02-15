@@ -1,3 +1,7 @@
-from src.worst_engine import WorstEngine
+"""
+Worst-move chess engine.
+Finds the worst legal move for any position.
+"""
+from src.engine import WorstEngine
 
-__all__ = ["WorstEngine"]
+__all__ = ['WorstEngine']
