@@ -6,13 +6,13 @@ Prints the worst move in UCI (e.g. e2e4).
 """
 import argparse
 import chess
-from src.worst_engine import WorstEngine
+from src.engine import WorstEngine
 
 
-def main() -> None:
+def main():
     parser = argparse.ArgumentParser(description="Get the worst legal move from a position.")
-    parser.add_argument("--depth", type=int, default=3, help="Search depth")
-    parser.add_argument("--time", type=int, default=5, help="Max time per move (seconds)")
+    parser.add_argument("--depth", type=int, default=2, help="Search depth")
+    parser.add_argument("--time", type=float, default=1.0, help="Max time per move (seconds)")
     parser.add_argument("--fen", type=str, default=chess.STARTING_FEN, help="Position in FEN")
     args = parser.parse_args()
 

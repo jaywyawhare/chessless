@@ -1,17 +1,11 @@
-from flask import (
-    Flask,
-    render_template,
-    jsonify,
-    request,
-    send_from_directory,
-    send_file,
-    abort,
-)
+from flask import Flask, render_template, jsonify, request, send_from_directory
 from flask_socketio import SocketIO, emit
 from flask_cors import CORS
-from src.worst_engine import WorstEngine
+from src.engine import WorstEngine
 import chess
 import os
+from typing import Optional
+import threading
 
 app = Flask(
     __name__,
@@ -20,14 +14,19 @@ app = Flask(
     static_url_path="",
 )
 CORS(app)
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 
 class GameState:
     def __init__(self):
         self.board = chess.Board()
-        self.engine = WorstEngine(depth=3, max_time=5)
-        self.player_color = None
+        self.engine = WorstEngine(depth=2, max_time=2.0)
+        self.player_color: Optional[bool] = None
+    
+    def set_depth(self, depth: int):
+        # Give more time for higher depths
+        max_time = 1.0 + (depth - 1) * 0.5
+        self.engine = WorstEngine(depth=min(depth, 5), max_time=max_time)
 
 
 game_state = GameState()
@@ -35,7 +34,7 @@ game_state = GameState()
 
 @app.route("/")
 def index():
-    return render_template("index.html") 
+    return render_template("index.html")
 
 
 @app.route("/assets/<path:filename>")
@@ -50,7 +49,6 @@ def serve_asset(filename):
 
 
 def _game_outcome():
-    """Return outcome string for game-over positions: checkmate, stalemate, or draw reason."""
     if not game_state.board.is_game_over():
         return None
     if game_state.board.is_checkmate():
@@ -68,17 +66,15 @@ def _game_outcome():
 
 @app.route("/api/game/status")
 def game_status():
-    return jsonify(
-        {
-            "fen": game_state.board.fen(),
-            "is_game_over": game_state.board.is_game_over(),
-            "outcome": _game_outcome(),
-            "is_check": game_state.board.is_check(),
-            "turn": "white" if game_state.board.turn else "black",
-            "player_color": "white" if game_state.player_color else "black",
-            "moves": [move.uci() for move in game_state.board.legal_moves],
-        }
-    )
+    return jsonify({
+        "fen": game_state.board.fen(),
+        "is_game_over": game_state.board.is_game_over(),
+        "outcome": _game_outcome(),
+        "is_check": game_state.board.is_check(),
+        "turn": "white" if game_state.board.turn else "black",
+        "player_color": "white" if game_state.player_color else "black",
+        "moves": [move.uci() for move in game_state.board.legal_moves],
+    })
 
 
 @socketio.on("select_color")
@@ -89,6 +85,25 @@ def handle_color_selection(data):
         if move:
             game_state.board.push(move)
             emit("move_made", {"move": move.uci(), "fen": game_state.board.fen()})
+
+
+def run_engine_and_emit():
+    """Run engine move and emit complete response."""
+    try:
+        engine_move = game_state.engine.get_worst_move(game_state.board)
+        if engine_move:
+            game_state.board.push(engine_move)
+        
+        socketio.emit("engine_move", {
+            "engine_move": engine_move.uci() if engine_move else None,
+            "fen": game_state.board.fen(),
+            "game_over": game_state.board.is_game_over(),
+            "outcome": _game_outcome(),
+            "check": game_state.board.is_check(),
+            "moves": [m.uci() for m in game_state.board.legal_moves],
+        })
+    except Exception as e:
+        app.logger.error(f"Engine error: {e}")
 
 
 @socketio.on("move")
@@ -106,47 +121,27 @@ def handle_move(data):
 
         game_state.board.push(move)
 
-        response = {
+        # Send immediate response with player's move
+        emit("player_move", {
             "valid": True,
             "fen": game_state.board.fen(),
             "last_move": move_uci,
             "game_over": game_state.board.is_game_over(),
-            "outcome": _game_outcome(),
+            "outcome": _game_outcome() if game_state.board.is_game_over() else None,
             "check": game_state.board.is_check(),
             "moves": [m.uci() for m in game_state.board.legal_moves],
-        }
+        })
 
-        # Engine response
+        # If game not over, run engine in background
         if not game_state.board.is_game_over():
-            engine_move = game_state.engine.get_worst_move(game_state.board)
-            if engine_move:
-                game_state.board.push(engine_move)
-                response.update(
-                    {
-                        "engine_move": engine_move.uci(),
-                        "fen": game_state.board.fen(),
-                        "game_over": game_state.board.is_game_over(),
-                        "outcome": _game_outcome(),
-                        "moves": [m.uci() for m in game_state.board.legal_moves],
-                    }
-                )
-
-        emit("move_response", response)
+            thread = threading.Thread(target=run_engine_and_emit)
+            thread.start()
+            
     except ValueError as e:
-        emit("move_response", {"valid": False, "message": str(e)})
+        emit("player_move", {"valid": False, "message": str(e)})
     except Exception as e:
         app.logger.error(f"Error handling move: {e}")
-        emit("move_response", {"valid": False, "message": "Invalid move"})
-
-
-@socketio.on("update_time")
-def handle_time_update(data):
-    try:
-        new_time = min(30, max(1, int(data["time"])))
-        game_state.engine.search.max_time = new_time
-        emit("time_updated", {"time": new_time})
-    except:
-        emit("time_updated", {"time": game_state.engine.search.max_time})
+        emit("player_move", {"valid": False, "message": "Invalid move"})
 
 
 @socketio.on("game_action")
@@ -157,8 +152,21 @@ def handle_game_action(data):
     elif action == "undo":
         if len(game_state.board.move_stack) > 0:
             game_state.board.pop()
+            if len(game_state.board.move_stack) > 0:
+                game_state.board.pop()
             emit("board_update", {"action": "undo", "fen": game_state.board.fen()})
+    elif action == "new_game":
+        game_state.board = chess.Board()
+        game_state.player_color = None
+        emit("board_update", {"action": "new_game", "fen": game_state.board.fen()})
+
+
+@socketio.on("set_depth")
+def handle_set_depth(data):
+    depth = data.get("depth", 2)
+    game_state.set_depth(depth)
+    emit("depth_updated", {"depth": depth})
 
 
 if __name__ == "__main__":
-    socketio.run(app, debug=True)
+    socketio.run(app, debug=True, host="0.0.0.0", port=5000, allow_unsafe_werkzeug=True)

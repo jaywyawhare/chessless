@@ -3,38 +3,126 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Chessless</title>
+    <title>Chessless - Worst Move Engine</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Roboto+Mono:wght@500&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
     <link rel="stylesheet" href="/assets/styles.css" />
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
   </head>
   <body>
     <div class="app">
-      <header class="header">
-        <h1 class="brand">Chessless</h1>
-        <div class="header-actions">
-          <span class="play-as">Play as</span>
-          <div class="segmented" role="group">
-            <button id="play-white" class="segmented-btn" type="button">White</button>
-            <button id="play-black" class="segmented-btn" type="button">Black</button>
+      <aside class="sidebar left">
+        <div class="player-card top">
+          <div class="player-avatar bot-avatar"><i data-lucide="bot"></i></div>
+          <div class="player-info">
+            <span class="player-name">Chessless</span>
+            <span class="player-rating">Worst Move Bot</span>
           </div>
-          <button id="flip" class="btn btn-icon" type="button" title="Flip board">↕</button>
-          <button id="undo" class="btn" type="button">Undo</button>
+          <div class="player-timer" id="timer-bot">0:00</div>
+          <div class="captured-pieces" id="captured-white"></div>
         </div>
-      </header>
+        
+        <div class="move-list-container">
+          <div class="move-list-header">Moves</div>
+          <div class="move-list" id="move-list"></div>
+        </div>
+        
+        <div class="player-card bottom">
+          <div class="player-avatar user-avatar"><i data-lucide="user"></i></div>
+          <div class="player-info">
+            <span class="player-name">You</span>
+            <span class="player-rating" id="player-color-text">Choose a side</span>
+          </div>
+          <div class="player-timer" id="timer-player">0:00</div>
+          <div class="captured-pieces" id="captured-black"></div>
+        </div>
+      </aside>
 
       <main class="main">
-        <div class="board-container">
-          <div class="board-coords board-coords-files"></div>
-          <div class="board-coords board-coords-ranks"></div>
-          <div id="board" class="board" role="grid" aria-label="Chess board"></div>
-        </div>
-        <div class="status-line">
-          <span id="status-text" class="status-text">Choose a side to play</span>
-          <span id="check-badge" class="badge badge-check" hidden>Check</span>
-          <span id="over-badge" class="badge badge-over" hidden>Game over</span>
+        <div class="board-wrapper">
+          <div class="board-container">
+            <div class="board-coords board-coords-files"></div>
+            <div class="board-coords board-coords-ranks"></div>
+            <div id="board" class="board" role="grid" aria-label="Chess board"></div>
+          </div>
+          
+          <div class="game-status">
+            <span id="status-text" class="status-text">Choose a side to play</span>
+            <span id="check-badge" class="badge badge-check" hidden>CHECK</span>
+          </div>
         </div>
       </main>
+
+      <aside class="sidebar right">
+        <div class="panel">
+          <h2 class="panel-title">Play As</h2>
+          <div class="color-buttons">
+            <button id="play-white" class="color-btn white-btn">
+              <span class="color-icon">♔</span>
+              <span>White</span>
+            </button>
+            <button id="play-black" class="color-btn black-btn">
+              <span class="color-icon">♚</span>
+              <span>Black</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2 class="panel-title">Game</h2>
+          <div class="button-group">
+            <button id="new-game" class="btn btn-primary">
+              <span class="btn-icon">↺</span> New Game
+            </button>
+            <button id="flip" class="btn">
+              <span class="btn-icon">⇅</span> Flip Board
+            </button>
+            <button id="undo" class="btn">
+              <span class="btn-icon">←</span> Undo
+            </button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2 class="panel-title">Game Time</h2>
+          <div class="time-buttons">
+            <button class="time-btn" data-time="120">2 min</button>
+            <button class="time-btn active" data-time="180">3 min</button>
+            <button class="time-btn" data-time="300">5 min</button>
+            <button class="time-btn" data-time="600">10 min</button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2 class="panel-title">Engine Depth</h2>
+          <div class="depth-control">
+            <input type="range" id="depth-slider" min="1" max="5" value="2" class="depth-slider">
+            <span id="depth-value" class="depth-value">2</span>
+          </div>
+        </div>
+
+        <div class="panel info-panel">
+          <h2 class="panel-title">About</h2>
+          <p class="info-text">
+            Chessless plays the <strong>worst</strong> legal moves. 
+            It will hang pieces, weaken its king, and avoid development.
+          </p>
+        </div>
+      </aside>
     </div>
+    
+    <div id="promotion-modal" class="modal" style="display: none;">
+      <div class="modal-content">
+        <div class="modal-title">Promote Pawn</div>
+        <div class="promotion-pieces" id="promotion-pieces"></div>
+      </div>
+    </div>
+    
     <script src="/assets/app.js"></script>
+    <script>
+      lucide.createIcons();
+    </script>
   </body>
 </html>

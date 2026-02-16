@@ -348,20 +348,27 @@ class GreedyEngine:
 
 class SearchEngine:
     """Search-based worst-move finder with shallow lookahead."""
-    __slots__ = ['evaluator', 'max_time', 'depth']
+    __slots__ = ['evaluator', 'max_time', 'depth', 'start_time']
     
     def __init__(self, depth: int = 2, max_time: float = 1.0):
         self.evaluator = Evaluator()
         self.max_time = max_time
-        self.depth = min(depth, 2)  # Cap at depth 2 for speed
+        self.depth = min(depth, 5)
+        self.start_time = 0.0
+    
+    def _is_timeout(self) -> bool:
+        import time
+        return time.time() - self.start_time >= self.max_time
     
     def get_worst_move(self, board: chess.Board) -> Optional[chess.Move]:
+        import time
         moves = list(board.legal_moves)
         if not moves:
             return None
         if len(moves) == 1:
             return moves[0]
         
+        self.start_time = time.time()
         ordered = order_moves(board)
         
         # Check for immediate mate
@@ -375,7 +382,12 @@ class SearchEngine:
         best_move = ordered[0]
         best_score = float('inf')
         
-        for move in ordered[:8]:
+        # Evaluate fewer moves at higher depth to stay fast
+        num_moves = max(4, 8 - self.depth)
+        
+        for move in ordered[:num_moves]:
+            if self._is_timeout():
+                break
             board.push(move)
             score = -self._search(board, self.depth - 1)
             board.pop()
@@ -387,7 +399,7 @@ class SearchEngine:
         return best_move
     
     def _search(self, board: chess.Board, depth: int) -> float:
-        if depth <= 0:
+        if self._is_timeout() or depth <= 0:
             return self.evaluator.evaluate(board)
         
         moves = list(board.legal_moves)
@@ -397,7 +409,12 @@ class SearchEngine:
         ordered = order_moves(board)
         best = -1e9
         
-        for move in ordered[:5]:
+        # Search fewer moves at deeper levels
+        num_moves = max(2, 5 - (self.depth - depth))
+        
+        for move in ordered[:num_moves]:
+            if self._is_timeout():
+                break
             board.push(move)
             score = -self._search(board, depth - 1)
             board.pop()

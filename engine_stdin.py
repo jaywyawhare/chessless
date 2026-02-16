@@ -2,21 +2,19 @@
 """
 Engine protocol over stdin/stdout for match play.
 Reads "fen <fen>" lines, outputs "move <uci>" lines. "quit" to exit.
-Uses DEPTH and TIME env vars if set (default 2, 2 for fast games).
 """
 import os
 import sys
 import chess
-from src.worst_engine import WorstEngine
+from src.engine import WorstEngine
 
 
-def main() -> None:
+def main():
     depth = int(os.environ.get("DEPTH", "2"))
-    # Allow fractional seconds for TIME
     try:
-        max_time = float(os.environ.get("TIME", "2"))
+        max_time = float(os.environ.get("TIME", "1"))
     except ValueError:
-        max_time = 2.0
+        max_time = 1.0
     engine = WorstEngine(depth=depth, max_time=max_time)
 
     for line in sys.stdin:
